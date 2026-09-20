@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSE Turnaround Intelligence</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div><h1>DSE Turnaround Intelligence</h1><p>LankaBangla-only research scanner</p></div>
+  <button id="theme">☾</button>
+</header>
+<main>
+<section class="hero">
+  <div><b>100-Point Turnaround Model</b><span>Loss→Profit • EPS • Cash Flow • NAV • Sales • Debt • Price • Volume • Margin</span></div>
+</section>
+<section class="controls">
+  <input id="search" placeholder="Search symbol or sector">
+  <select id="signal"><option value="">All signals</option><option>STRONG</option><option>WATCH</option><option>AVERAGE</option></select>
+  <select id="min"><option value="0">Any score</option><option value="60">60+</option><option value="80">80+</option></select>
+  <button id="reload">Refresh</button>
+</section>
+<section id="stats" class="stats"></section>
+<section class="card">
+<div class="tablewrap"><table>
+<thead><tr>
+<th>Symbol</th><th>Sector</th><th>LTP</th><th>EPS</th><th>NOCFPS</th><th>NAV</th><th>Score</th><th>Signal</th>
+</tr></thead>
+<tbody id="rows"></tbody>
+</table></div>
+</section>
+<p class="note">N/A means the required value was not verified from LankaBangla. The scanner does not guess missing financial data.</p>
+</main>
+<script src="app.js"></script>
+</body></html>
