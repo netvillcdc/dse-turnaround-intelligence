@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "docs" / "data" / "stocks.json"
 HISTORY = ROOT / "data" / "history.json"
 RAW = ROOT / "data" / "raw"
+RAW.mkdir(parents=True, exist_ok=True)
 
 HEADERS = {"User-Agent": "Mozilla/5.0 DSE-Turnaround-Intelligence/1.0"}
 
