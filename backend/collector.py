@@ -1,139 +1,153 @@
-import json
-import time
-from datetime import date, timedelta
+from __future__ import annotations
 from pathlib import Path
-
-import requests
-
-from parsers import parse_data_matrix, parse_event_page, parse_latest_earnings
-from score import score_stock, signal
+from datetime import datetime, timezone, timedelta
+import json, re, requests
+from bs4 import BeautifulSoup
+from score import analyze
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "docs" / "data" / "stocks.json"
-HISTORY = ROOT / "data" / "history.json"
+DOCS_DATA = ROOT / "docs" / "data"
 RAW = ROOT / "data" / "raw"
+DOCS_DATA.mkdir(parents=True, exist_ok=True)
 RAW.mkdir(parents=True, exist_ok=True)
 
-HEADERS = {"User-Agent": "Mozilla/5.0 DSE-Turnaround-Intelligence/1.0"}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Turnaround-Engine/2.0)"}
+TIMEOUT = 25
 
-URLS = {
-    "matrix": "https://www.lankabd.com/Home/DataMatrix",
-    "earnings": "https://www.lankabd.com/Details/GetLatestEarnings",
-    "events": "https://www.lankabd.com/Details/Event",
-}
-
-def load_json(path, default):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return default
-
-def save_json(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
-
-def get(url, params=None):
-    r = requests.get(url, params=params, headers=HEADERS, timeout=40)
+def get(url):
+    r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
     r.raise_for_status()
     return r.text
 
-def collect():
-    today = date.today().isoformat()
+def clean(v):
+    return re.sub(r"\s+", " ", str(v or "")).strip()
 
-    # 1) Current Data Matrix: LTP, sector, volume, EPS, NAV.
-    matrix_html = get(URLS["matrix"])
-    (RAW / "datamatrix.html").write_text(matrix_html, encoding="utf-8")
-    matrix = {x["symbol"]: x for x in parse_data_matrix(matrix_html)}
+def num(v):
+    try:
+        s = clean(v).replace(",", "")
+        if s in ("", "-", "N/A", "n/a"):
+            return None
+        return float(re.sub(r"[^0-9.\-]", "", s))
+    except Exception:
+        return None
 
-    # 2) Latest earnings table.
-    latest_html = get(URLS["earnings"])
-    (RAW / "latest_earnings.html").write_text(latest_html, encoding="utf-8")
-    latest = {x["symbol"]: x for x in parse_latest_earnings(latest_html)}
+def tables(html):
+    soup = BeautifulSoup(html, "html.parser")
+    out=[]
+    for table in soup.find_all("table"):
+        rows=[]
+        for tr in table.find_all("tr"):
+            cells=[clean(x.get_text(" ", strip=True)) for x in tr.find_all(["th","td"])]
+            if cells: rows.append(cells)
+        if len(rows)>=2: out.append(rows)
+    return out
 
-    # 3) Recent quarterly earnings events. Search recent dates because the event page
-    # is date-filtered. We intentionally use its documented public URL parameters.
-    events = {}
-    for days_ago in range(0, 45):
-        d = date.today() - timedelta(days=days_ago)
-        params = {
-            "catName": "Quarterly_Earnings",
-            "category": "8",
-            "fromDate": d.isoformat(),
-            "toDate": d.isoformat(),
-            "pageSize": "100",
-            "page": "1",
+def matrix():
+    html = get("https://www.lankabd.com/Home/DataMatrix")
+    (RAW/"datamatrix.html").write_text(html, encoding="utf-8")
+    result=[]
+    for t in tables(html):
+        header=[x.lower() for x in t[0]]
+        if not any("symbol" in x for x in header): continue
+        idx={h:i for i,h in enumerate(header)}
+        for row in t[1:]:
+            if not row or not row[0]: continue
+            def col(*names):
+                for n in names:
+                    for h,i in idx.items():
+                        if n in h and i < len(row): return row[i]
+                return None
+            result.append({
+                "symbol": col("symbol") or row[0],
+                "sector": col("sector"),
+                "ltp": num(col("ltp")),
+                "volume": num(col("volume")),
+                "turnover": num(col("turnover")),
+                "eps_current": num(col("eps")),
+                "nav_current": num(col("nav")),
+            })
+        if result: break
+    return result
+
+def latest_earnings():
+    html = get("https://lankabd.com/Details/GetLatestEarnings")
+    (RAW/"latest_earnings.html").write_text(html, encoding="utf-8")
+    result={}
+    for t in tables(html):
+        h=[x.lower() for x in t[0]]
+        idx={x:i for i,x in enumerate(h)}
+        if not any("symbol" in x for x in h): continue
+        for row in t[1:]:
+            if len(row)<2: continue
+            def c(*names):
+                for n in names:
+                    for hh,i in idx.items():
+                        if n in hh and i<len(row): return row[i]
+                return None
+            sym=c("symbol")
+            if sym: result[sym]={"eps":num(c("eps","epu")),"nav":num(c("nav")),"period":c("year")}
+        if result: break
+    return result
+
+def event_history(days=120):
+    events={}
+    today=datetime.now(timezone.utc).date()
+    for d in range(days):
+        day=today-timedelta(days=d)
+        url=f"https://lankabd.com/Details/Event?catName=Quarterly_Earnings&category=8&fromDate={day}&toDate={day}"
+        try: html=get(url)
+        except Exception: continue
+        (RAW/f"earnings_{day}.html").write_text(html, encoding="utf-8")
+        soup=BeautifulSoup(html,"html.parser")
+        text=clean(soup.get_text(" ", strip=True))
+        # Keep page-level evidence. Exact structured extraction depends on the portal's current HTML.
+        # The dashboard will not invent values if structured comparisons are not exposed.
+        for m in re.finditer(r"\b([A-Z][A-Z0-9&.\-]{2,})\b", text):
+            sym=m.group(1)
+            if sym not in events:
+                events[sym]={"evidence_date":str(day)}
+    return events
+
+def main():
+    rows=matrix()
+    earnings=latest_earnings()
+    event_hist=event_history()
+    out=[]
+    for r in rows:
+        sym=r["symbol"]
+        e=earnings.get(sym,{})
+        m={
+            "eps_current": r.get("eps_current") if r.get("eps_current") is not None else e.get("eps"),
+            "eps_previous": None,
+            "nocfps_current": None, "nocfps_previous": None,
+            "nav_current": r.get("nav_current") if r.get("nav_current") is not None else e.get("nav"),
+            "nav_previous": None,
+            "sales_current": None, "sales_previous": None,
+            "debt_current": None, "debt_previous": None,
+            "margin_current": None, "margin_previous": None,
+            "price_recovery_pct": None, "volume_change_pct": None,
+            "loss_to_profit": None,
         }
-        try:
-            html = get(URLS["events"], params=params)
-            for x in parse_event_page(html):
-                events[x["symbol"]] = x
-        except Exception as exc:
-            print("event skip", d, str(exc))
-        time.sleep(0.15)
+        result=analyze(m)
+        out.append({
+            **r,
+            "analysis": result,
+            "evidence": {
+                "latest_earnings": e,
+                "quarterly_event_found": sym in event_hist,
+                "note": "Only verified structured values are scored. Missing comparisons remain N/A."
+            },
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        })
+    payload={
+        "engine":"Turnaround Engine v2",
+        "source":"LankaBangla",
+        "generated_at":datetime.now(timezone.utc).isoformat(),
+        "methodology":"Evidence-first; missing metrics are N/A and do not receive points.",
+        "stocks":out
+    }
+    (DOCS_DATA/"stocks.json").write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding="utf-8")
+    print(f"Saved {len(out)} stocks")
 
-    old = {x.get("symbol"): x for x in load_json(DATA, [])}
-    symbols = sorted(set(matrix) | set(latest) | set(events))
-    rows = []
-
-    for sym in symbols:
-        m = matrix.get(sym, {})
-        l = latest.get(sym, {})
-        e = events.get(sym, {})
-        old_row = old.get(sym, {})
-
-        eps = m.get("eps")
-        nav = m.get("nav")
-
-        row = {
-            "symbol": sym,
-            "sector": m.get("sector") or l.get("sector_latest") or old_row.get("sector") or "N/A",
-            "ltp": m.get("ltp"),
-            "volume": m.get("volume"),
-            "turnover": m.get("turnover"),
-            "eps": eps if eps is not None else l.get("eps_latest"),
-            "nav": nav if nav is not None else l.get("nav_latest"),
-
-            # Event comparison:
-            "eps_prev": e.get("eps_event_prev"),
-            "nocfps": e.get("nocfps_event"),
-            "nocfps_prev": e.get("nocfps_event_prev"),
-            "nav_prev": e.get("nav_event_prev"),
-
-            "loss_to_profit": e.get("loss_to_profit"),
-            "eps_up": e.get("eps_event_up"),
-            "nocfps_up": e.get("nocfps_event_up"),
-            "nav_up": e.get("nav_event_up"),
-
-            # These remain N/A until a verified LankaBangla financial-statement source
-            # is wired in. Never infer them from unrelated fields.
-            "sales_up": None,
-            "debt_down": None,
-            "price_recovery": None,
-            "volume_confirm": None,
-            "margin_up": None,
-
-            "updated": today,
-            "source": "LankaBangla",
-        }
-
-        # Simple volume flag only when a verified prior-volume field exists in the
-        # existing normalized record. This is deliberately conservative.
-        if m.get("volume") is not None and old_row.get("volume") is not None:
-            row["volume_confirm"] = m["volume"] > old_row["volume"]
-
-        row["score"] = score_stock(row)
-        row["signal"] = signal(row["score"])
-        rows.append(row)
-
-    rows.sort(key=lambda x: (x["score"], x["symbol"]), reverse=True)
-    save_json(DATA, rows)
-
-    history = load_json(HISTORY, {})
-    history[today] = rows
-    save_json(HISTORY, history)
-
-    return rows
-
-if __name__ == "__main__":
-    result = collect()
-    print("DSE Turnaround Intelligence updated:", len(result), "symbols")
+if __name__=="__main__":
+    main()

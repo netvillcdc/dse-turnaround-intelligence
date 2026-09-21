@@ -1,35 +1,64 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DSE Turnaround Intelligence</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSE Turnaround Intelligence — Engine v2</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header>
-  <div><h1>DSE Turnaround Intelligence</h1><p>LankaBangla-only research scanner</p></div>
+  <div>
+    <h1>DSE Turnaround Intelligence</h1>
+    <p>Evidence-first Turnaround Engine v2</p>
+  </div>
   <button id="theme">☾</button>
 </header>
+
 <main>
-<section class="hero">
-  <div><b>100-Point Turnaround Model</b><span>Loss→Profit • EPS • Cash Flow • NAV • Sales • Debt • Price • Volume • Margin</span></div>
+<section class="cards">
+  <div class="card"><small>Stocks</small><strong id="total">0</strong></div>
+  <div class="card"><small>Strong Turnaround</small><strong id="strong">0</strong></div>
+  <div class="card"><small>Average Score</small><strong id="avg">0</strong></div>
+  <div class="card"><small>Updated</small><strong id="updated">—</strong></div>
 </section>
+
 <section class="controls">
-  <input id="search" placeholder="Search symbol or sector">
-  <select id="signal"><option value="">All signals</option><option>STRONG</option><option>WATCH</option><option>AVERAGE</option></select>
-  <select id="min"><option value="0">Any score</option><option value="60">60+</option><option value="80">80+</option></select>
-  <button id="reload">Refresh</button>
+  <input id="search" placeholder="Search symbol / sector">
+  <select id="type">
+    <option value="">All types</option>
+    <option>STRONG TURNAROUND</option>
+    <option>TURNAROUND</option>
+    <option>CASH-FLOW / EARNINGS IMPROVEMENT</option>
+    <option>EARLY IMPROVEMENT</option>
+    <option>WATCH — MIXED EVIDENCE</option>
+    <option>WEAK / NOT CONFIRMED</option>
+  </select>
+  <select id="min">
+    <option value="0">Score: All</option>
+    <option value="80">80+</option>
+    <option value="60">60+</option>
+    <option value="40">40+</option>
+  </select>
 </section>
-<section id="stats" class="stats"></section>
-<section class="card">
-<div class="tablewrap"><table>
+
+<section class="note">
+  <b>Important:</b> N/A means the source did not provide enough verified comparison data.
+  It is never converted into a positive score.
+</section>
+
+<section class="table-wrap">
+<table>
 <thead><tr>
-<th>Symbol</th><th>Sector</th><th>LTP</th><th>EPS</th><th>NOCFPS</th><th>NAV</th><th>Score</th><th>Signal</th>
+<th>Symbol</th><th>Sector</th><th>LTP</th><th>EPS</th><th>NAV</th>
+<th>Score</th><th>Coverage</th><th>Type</th>
 </tr></thead>
 <tbody id="rows"></tbody>
-</table></div>
+</table>
 </section>
-<p class="note">N/A means the required value was not verified from LankaBangla. The scanner does not guess missing financial data.</p>
+
+<section id="detail" class="detail hidden"></section>
 </main>
 <script src="app.js"></script>
-</body></html>
+</body>
+</html>
